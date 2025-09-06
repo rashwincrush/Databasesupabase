@@ -29,12 +29,14 @@ if ! ls supabase/migrations/*baseline_remote_schema.sql >/dev/null 2>&1; then
   fi
 fi
 
-# Run schema diff
-ts=$(date +%Y%m%d%H%M%S)
-file="supabase/migrations/${ts}_remote_delta.sql"
+# Run schema diff (inline date expression per request)
+file="supabase/migrations/$(date +%Y%m%d%H%M%S)_remote_delta.sql"
 npx supabase db diff --linked \
   --schema public,auth,storage,realtime,graphql_public,cron,vault \
-  --file "$file" || true
+  --file "$file" | cat || true
+
+# Derive TS from the generated file name for subsequent steps
+ts=$(basename "$file" | cut -d'_' -f1)
 
 # If diff produced nothing, create a no-op migration so we can mark applied
 if [ ! -f "$file" ] || [ ! -s "$file" ]; then
@@ -83,8 +85,12 @@ fi
 # Type generation (TS defs)
 npx supabase gen types typescript --linked --schema public,auth,storage,realtime,graphql_public,cron,vault > supabase/types/database.types.ts
 
-# Validate migrations locally (optional)
-npx supabase db reset || echo "db reset failed, please review the latest migration order/dependencies"
+# Validate migrations locally (optional; gated by RUN_DB_RESET=1)
+if [ "${RUN_DB_RESET:-}" = "1" ]; then
+  npx supabase db reset || echo "db reset failed, please review the latest migration order/dependencies"
+else
+  echo "Skipping local db reset (set RUN_DB_RESET=1 to enable)"
+fi
 
 # Git commit & push
 git add -A
