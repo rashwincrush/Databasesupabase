@@ -1,0 +1,7 @@
+{
+  "scripts": {
+    "sync:remote": "bash scripts/sync-remote-to-git.sh",
+    "db:diff:remote": "supabase db diff --linked --schema public,auth,storage,realtime,graphql_public,cron,vault --file supabase/migrations/$(date +%Y%m%d%H%M%S)_remote_delta.sql",
+    "db:reset:local": "supabase db reset"
+  }
+}
