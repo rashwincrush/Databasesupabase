@@ -8,6 +8,27 @@ npx supabase projects list | grep gvbtfolcizkzihforqte || npx supabase link --pr
 # Ensure directories exist
 mkdir -p supabase/migrations supabase/seeds supabase/functions supabase/types supabase/storage supabase/secrets
 
+# Ensure baseline migration exists (one-time) so local resets have full schema
+if ! ls supabase/migrations/*baseline_remote_schema.sql >/dev/null 2>&1; then
+  echo "No baseline migration found. Pulling full remote schema as baseline..."
+  npx supabase db pull --linked || true
+  latest_schema=$(ls -t supabase/migrations/*_remote_schema.sql 2>/dev/null | head -1 || true)
+  if [ -n "$latest_schema" ]; then
+    mv "$latest_schema" supabase/migrations/00000000000000_baseline_remote_schema.sql
+    echo "Baseline created at supabase/migrations/00000000000000_baseline_remote_schema.sql"
+  else
+    echo "WARN: Could not locate a generated *_remote_schema.sql to use as baseline. Falling back to db dump..."
+    npx supabase db dump --linked \
+      --schema public,auth,storage,realtime,graphql_public,cron,vault \
+      -f supabase/migrations/00000000000000_baseline_remote_schema.sql || true
+    if [ -s supabase/migrations/00000000000000_baseline_remote_schema.sql ]; then
+      echo "Baseline created via db dump at supabase/migrations/00000000000000_baseline_remote_schema.sql"
+    else
+      echo "WARN: Baseline dump failed; proceeding without baseline. Local db reset may fail until baseline exists."
+    fi
+  fi
+fi
+
 # Run schema diff
 ts=$(date +%Y%m%d%H%M%S)
 file="supabase/migrations/${ts}_remote_delta.sql"
@@ -32,8 +53,15 @@ npx supabase db dump --linked --role-only -f supabase/roles.sql || true
 
 # Edge Functions export
 npx supabase functions list -o json > /tmp/functions.json || echo '[]' > /tmp/functions.json
-for name in $(jq -r '.[]? | .name // .slug // empty' /tmp/functions.json); do
-  # Download into a clean folder per function
+parsed_names=$(jq -r '.[]? | .name // .slug // empty' /tmp/functions.json || echo "")
+fallback_names=("event-reminders" "mentor-matching" "send-feedback-notification" "admin-delete-user")
+
+for name in $parsed_names; do
+  rm -rf "supabase/functions/$name"
+  npx supabase functions download "$name" -f "supabase/functions/$name" || true
+done
+
+for name in "${fallback_names[@]}"; do
   rm -rf "supabase/functions/$name"
   npx supabase functions download "$name" -f "supabase/functions/$name" || true
 done
